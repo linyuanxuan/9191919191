@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!--
+  91 video — 单文件 Rickroll 整活页
+  两个视图：#home（落地页） / #pranked（被骗页），用 location.hash 切换，不刷新页面。
+  全局计数完全由 Cloudflare Workers + KV 维护，本页不使用 localStorage / cookie。
+  部署前：把下面 <html> 上的 data-api 改成你的 Worker 地址。
+-->
+<html lang="zh-CN" data-api="https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>91 video</title>
+<style>
+  /* 简约白底黑框，无特效 */
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    padding: 32px 16px;
+    background: #fff;
+    color: #000;
+    font: 16px/1.7 "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  }
+  .box {
+    max-width: 760px;
+    margin: 0 auto;
+    border: 2px solid #000;
+    padding: 40px 28px;
+    text-align: center;
+  }
+  h1 { margin: 0 0 28px; font-size: 28px; font-weight: 700; letter-spacing: .04em; }
+  .btns { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  button {
+    min-width: 140px;
+    padding: 12px 20px;
+    border: 2px solid #000;
+    background: #fff;
+    color: #000;
+    font: inherit;
+    font-size: 17px;
+    cursor: pointer;
+  }
+  button:hover, button:focus-visible { background: #000; color: #fff; outline: none; }
+  .note { margin: 24px 0 0; font-size: 14px; }
+  .counter { margin: 0 0 20px; font-size: 22px; font-weight: 700; }
+  .err { margin: 12px 0 0; font-size: 14px; border: 1px solid #000; padding: 8px; }
+  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; border: 2px solid #000; background: #000; }
+  #player, .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  a { color: #000; text-decoration: underline; }
+  .small { font-size: 13px; }
+  @media (max-width: 520px) {
+    .box { padding: 24px 16px; }
+    h1 { font-size: 22px; }
+    .counter { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<main class="box">
+
+  <!-- 视图 1：落地页 -->
+  <section id="view-home">
+    <h1>91 video</h1>
+    <div class="btns">
+      <button type="button" id="ch1">通道01</button>
+      <button type="button" id="ch2">通道02</button>
+    </div>
+    <p class="note">本站永远免费</p>
+  </section>
+
+  <!-- 视图 2：被骗页 -->
+  <section id="view-pranked" hidden>
+    <h1>你被骗了</h1>
+    <p class="counter" id="counter">正在统计…</p>
+
+    <div class="video">
+      <!-- YouTube IFrame Player API 会把 iframe 挂到 #player 里 -->
+      <div id="player"></div>
+    </div>
+
+    <p class="note" id="sound-tip">点击页面任意位置开启声音</p>
+    <p class="note small">
+      视频无法播放？<a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener">点此直接打开</a>
+      · <a href="#" id="back">返回首页</a>
+    </p>
+    <p class="err" id="err" hidden></p>
+    <button type="button" id="retry" hidden>重新获取计数</button>
+  </section>
+
+  <noscript><p class="note">本页需要 JavaScript 才能播放视频与计数。</p></noscript>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------------- 配置 ---------------- */
+  var VIDEO_ID = 'dQw4w9WgXcQ'; // Rick Astley - Never Gonna Give You Up
+
+  // 优先级：?api=xxx > window.RICKROLL_API > <html data-api> > 同源相对路径
+  // 例：https://rickroll-counter.<你的子域>.workers.dev（末尾不要带 /）
+  var param = new URLSearchParams(location.search).get('api');
+  var configured = window.RICKROLL_API ||
+                   document.documentElement.getAttribute('data-api') || '';
+  var API_BASE = (param || configured).replace(/\/+$/, '');
+
+  // 占位符未替换时不要发请求到无效域名，直接走友好提示
+  if (API_BASE.indexOf('YOUR-WORKER') !== -1) API_BASE = '';
+  function api(path) { return API_BASE ? API_BASE + path : path; }
+
+  /* ---------------- DOM ---------------- */
+  var home = document.getElementById('view-home');
+  var pranked = document.getElementById('view-pranked');
+  var counterEl = document.getElementById('counter');
+  var errEl = document.getElementById('err');
+  var retryEl = document.getElementById('retry');
+  var tipEl = document.getElementById('sound-tip');
+  var playerBox = document.getElementById('player');
+
+  /* ---------------- 计数接口 ---------------- */
+  // 统一封装：超时中断 + HTTP 状态检查 + 返回值校验，永远不阻塞页面
+  function request(path, options, timeoutMs) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+    var opts = Object.assign({ signal: ctrl.signal }, options || {});
+    return fetch(api(path), opts)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var n = Number(data && data.count);
+        // 脏数据容错：必须是有限的非负整数
+        if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n || n > Number.MAX_SAFE_INTEGER) {
+          throw new Error('返回数据格式异常');
+        }
+        return n;
+      })
+      .finally(function () { clearTimeout(timer); });
+  }
+
+  function setCounter(text) { counterEl.textContent = text; }
+  function showError(msg) {
+    errEl.textContent = msg + '（计数不影响视频播放）';
+    errEl.hidden = false;
+    retryEl.hidden = false;
+  }
+  function hideError() { errEl.hidden = true; retryEl.hidden = true; }
+
+  var hitLocked = false;
+  function reportHit() {
+    if (hitLocked) return;
+
+    // 还没配置 Worker 地址：直接给提示，不发注定失败的请求
+    if (!API_BASE) {
+      setCounter('还没配置计数服务，但被骗依然成立');
+      showError('请在 index.html 的 data-api 填入 Worker 地址，或用 ?api=<地址> 指定');
+      return;
+    }
+
+    hitLocked = true;
+    setCounter('正在统计…');
+    hideError();
+
+    // 1) 正常路径：POST /api/hit 计数 +1
+    request('/api/hit', { method: 'POST' }, 8000)
+      .then(function (n) {
+        setCounter('你是第 ' + n + ' 个被骗的');
+      })
+      .catch(function (e) {
+        // 2) 降级路径：只读 GET /api/count，至少把当前数字显示出来
+        request('/api/count', { method: 'GET' }, 5000)
+          .then(function (n) { setCounter('你是第 ' + n + ' 个被骗的（只读）'); })
+          .catch(function () { setCounter('计数服务暂时不可用，但被骗依然成立'); });
+        showError('计数接口连接失败：' + (e && e.message ? e.message : '未知错误'));
+      })
+      .finally(function () { hitLocked = false; });
+  }
+
+  /* ---------------- 视频 ---------------- */
+  var player = null;
+  var fallbackUsed = false;
+  var soundOn = false;
+  var videoReady = false;   // 播放器就绪后才允许「点击开声音」生效
+
+  // muted=true 静音自动播放；muted=false 用于用户手势后重建播放器开声音
+  function embedUrl(muted) {
+    return 'https://www.youtube-nocookie.com/embed/' + VIDEO_ID +
+           '?autoplay=1&mute=' + (muted ? 1 : 0) +
+           '&loop=1&playlist=' + VIDEO_ID + '&playsinline=1&rel=0';
+  }
+
+  // IFrame API 加载失败（网络受限 / 脚本被拦）时，降级为普通 iframe
+  function fallbackIframe() {
+    if (fallbackUsed || !playerBox) return;
+    fallbackUsed = true;
+    try { if (player && player.destroy) player.destroy(); } catch (e) {}
+    var f = document.createElement('iframe');
+    f.id = 'yt-fallback';
+    f.src = embedUrl(true);           // 静音自动播放
+    f.title = 'Never Gonna Give You Up';
+    f.allow = 'autoplay; encrypted-media; picture-in-picture';
+    f.setAttribute('allowfullscreen', '');
+    playerBox.textContent = '';
+    playerBox.appendChild(f);
+    videoReady = true;
+  }
+
+  function initPlayer() {
+    if (fallbackUsed || player || !window.YT || !window.YT.Player) return;
+    player = new window.YT.Player('player', {
+      videoId: VIDEO_ID,
+      playerVars: {
+        autoplay: 1,      // 静音状态下浏览器允许自动播放
+        mute: 1,
+        playsinline: 1,
+        loop: 1,
+        playlist: VIDEO_ID,
+        controls: 1,
+        rel: 0,
+        modestbranding: 1
+      },
+      events: {
+        onReady: function (e) {
+          videoReady = true;
+          try {
+            e.target.mute();
+            e.target.playVideo();
+          } catch (err) {
+            tipEl.textContent = '自动播放被拦截，请点击视频播放';
+          }
+        },
+        onError: function () { fallbackIframe(); }
+      }
+    });
+  }
+
+  function loadPlayer() {
+    if (window.YT && window.YT.Player) { initPlayer(); return; }
+    window.onYouTubeIframeAPIReady = initPlayer;
+    var tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    tag.onerror = fallbackIframe;
+    document.head.appendChild(tag);
+    // 6 秒还没拿到 API 就降级，避免页面永远空白
+    setTimeout(function () {
+      if (!player && !fallbackUsed && !(window.YT && window.YT.Player)) fallbackIframe();
+    }, 6000);
+  }
+
+  // 点击页面任意位置开启声音：满足浏览器「用户手势后才允许有声播放」的要求
+  function enableSound(e) {
+    if (soundOn || !videoReady) return;
+    var t = e && e.target;
+    // 排除导航类点击，避免刚进页面就被误判为「开声音」
+    if (t && (t.id === 'ch1' || t.id === 'ch2' || t.id === 'back')) return;
+    soundOn = true;
+    if (player && player.unMute) {
+      try {
+        player.unMute();
+        player.setVolume(100);
+        player.playVideo();
+      } catch (e) { /* 播放器尚未就绪，保持静音即可 */ }
+    } else {
+      // 降级 iframe 无法跨域改音量，重建为非静音地址
+      var f = document.getElementById('yt-fallback');
+      if (f) f.src = embedUrl(false);
+    }
+    tipEl.textContent = '声音已开启';
+  }
+
+  /* ---------------- 视图路由 ---------------- */
+  var hitSent = false;   // 每次页面加载只上报一次，避免刷新/回退重复计数
+  var videoLoaded = false;
+
+  function enterPranked() {
+    if (!videoLoaded) { videoLoaded = true; loadPlayer(); }
+    if (!hitSent) { hitSent = true; reportHit(); }
+  }
+
+  function render() {
+    var isPranked = (location.hash === '#pranked');
+    home.hidden = isPranked;
+    pranked.hidden = !isPranked;
+    if (isPranked) enterPranked();
+  }
+
+  // 两个通道都跳到同一个被骗页
+  ['ch1', 'ch2'].forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function () {
+      location.hash = '#pranked';
+    });
+  });
+  document.getElementById('back').addEventListener('click', function (e) {
+    e.preventDefault();
+    location.hash = '';
+  });
+  retryEl.addEventListener('click', reportHit);
+  document.addEventListener('click', function (e) {
+    if (location.hash === '#pranked') enableSound(e);
+  });
+  window.addEventListener('hashchange', render);
+  render(); // 支持直接用 index.html#pranked 打开
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>91 video · 用 Workers KV 统计「被骗人数」的 Rickroll 整活页</title>
+<meta name="description" content="91 video：单文件前端 + Cloudflare Workers KV 全局计数器的 Rickroll 整活项目，含 CORS 预检、IP 限流与脏数据容错。">
+
+<meta property="og:type" content="website">
+
+<meta property="og:title" content="91 video · 用 Workers KV 统计「被骗人数」的 Rickroll 整活页">
+<meta property="og:description" content="91 video：单文件前端 + Cloudflare Workers KV 全局计数器的 Rickroll 整活项目，含 CORS 预检、IP 限流与脏数据容错。">
+<meta name="theme-color" content="#0a0c10">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
+<style>
+  :root{
+    --bg:#0a0c10; --bg2:#0d1017; --surface:#11151d; --surface2:#151a24;
+    --line:#1e2531; --line2:#2a3341;
+    --ink:#e9edf4; --sub:#8d98ad; --dim:#5d6779;
+    --accent:#5fd3c4; --accent2:#7f8cf9; --warn:#f0b45f;
+    --mono:"JetBrains Mono","SF Mono",Consolas,"Cascadia Code",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(900px 500px at 15% -10%,rgba(95,211,196,.12),transparent 60%),
+               radial-gradient(800px 500px at 85% 0%,rgba(127,140,249,.10),transparent 60%)}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.35;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:64px 64px;
+    mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 65%);
+    -webkit-mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 65%)}
+  .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 24px}
+
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(10,12,16,.72);border-bottom:1px solid var(--line)}
+  nav .inner{max-width:1080px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:16px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:-.01em}
+  .logo .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 14px var(--accent)}
+  nav .links{margin-left:auto;display:flex;align-items:center;gap:22px}
+  nav a.txt{color:var(--sub);text-decoration:none;font-size:14px;transition:.18s}
+  nav a.txt:hover{color:var(--ink)}
+  .gh-btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;background:var(--surface2);
+    border:1px solid var(--line2);color:var(--ink);padding:7px 14px;border-radius:9px;font-size:13.5px;font-weight:600;transition:.18s}
+  .gh-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+  .gh-btn svg{width:16px;height:16px;fill:currentColor}
+  @media(max-width:720px){nav .links a.txt{display:none}}
+
+  header.hero{padding:84px 0 64px}
+  .chip{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--accent);
+    background:rgba(95,211,196,.08);border:1px solid rgba(95,211,196,.25);padding:5px 12px;border-radius:999px}
+  .chip .pulse{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+  h1{font-size:clamp(34px,5.4vw,58px);line-height:1.12;letter-spacing:-.03em;margin:22px 0 18px;font-weight:800}
+  h1 .grad{background:linear-gradient(100deg,var(--accent),var(--accent2) 70%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lead{color:var(--sub);font-size:17.5px;max-width:660px;margin:0 0 32px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:9px;text-decoration:none;font-weight:650;font-size:15px;padding:12px 22px;border-radius:11px;transition:.18s}
+  .btn.primary{background:linear-gradient(180deg,#6ee0d0,#4bc4b5);color:#05201d;box-shadow:0 8px 26px -10px rgba(95,211,196,.65)}
+  .btn.primary:hover{transform:translateY(-2px);box-shadow:0 14px 34px -12px rgba(95,211,196,.75)}
+  .btn.ghost{border:1px solid var(--line2);color:var(--ink);background:var(--surface)}
+  .btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .btn svg{width:17px;height:17px;fill:currentColor}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:52px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--line)}
+  .stat{background:var(--surface);padding:18px 20px}
+  .stat .k{font-family:var(--mono);font-size:24px;font-weight:700;letter-spacing:-.02em}
+  .stat .k em{color:var(--accent);font-style:normal}
+  .stat .v{color:var(--dim);font-size:12.5px;margin-top:3px}
+  @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+  .terminal{margin:44px 0 0;background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--line2);border-radius:14px;overflow:hidden;box-shadow:0 30px 60px -30px #000}
+  .term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+  .term-bar i{width:11px;height:11px;border-radius:50%;display:block}
+  .term-bar i:nth-child(1){background:#f2635f}.term-bar i:nth-child(2){background:#f0b44c}.term-bar i:nth-child(3){background:#5fc46a}
+  .term-bar .t{margin-left:8px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .term-body{padding:18px 20px;font-family:var(--mono);font-size:13.2px;line-height:1.85;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+  .term-body .c{color:var(--accent)}
+  .term-body .m{color:var(--dim)}
+  .term-body .p{color:var(--accent2)}
+
+  section{padding:78px 0}
+  .sec-head{margin-bottom:38px}
+  .sec-head .num{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.08em}
+  h2{font-size:clamp(24px,3.4vw,32px);letter-spacing:-.02em;margin:10px 0 8px;font-weight:750}
+  .sec-head p{color:var(--sub);margin:0;font-size:15.5px;max-width:620px}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:600px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;transition:.2s;position:relative;overflow:hidden}
+  .card:hover{border-color:var(--line2);transform:translateY(-3px);background:var(--surface2)}
+  .card .ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;margin-bottom:14px;background:rgba(95,211,196,.1);border:1px solid rgba(95,211,196,.22);font-size:17px}
+  .card h3{margin:0 0 7px;font-size:15.5px;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--sub);font-size:14px;line-height:1.65}
+
+  .steps{display:flex;flex-direction:column;gap:20px}
+  .step{display:grid;grid-template-columns:44px 1fr;gap:18px;align-items:start}
+  .step .n{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent);background:rgba(95,211,196,.09);border:1px solid rgba(95,211,196,.22)}
+  .step h4{margin:2px 0 10px;font-size:15.5px}
+  .step .note{color:var(--dim);font-size:13.5px;margin:8px 0 0}
+  .code{position:relative;background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:14px 16px;font-family:var(--mono);font-size:13.2px;line-height:1.8;overflow-x:auto;color:#c7d0de;white-space:pre-wrap;word-break:break-word}
+  .copy{position:absolute;top:9px;right:9px;background:var(--surface2);border:1px solid var(--line2);color:var(--sub);font-size:11.5px;font-family:var(--mono);padding:4px 9px;border-radius:7px;cursor:pointer;transition:.16s;opacity:0}
+  .code:hover .copy{opacity:1}
+  .copy:hover,.copy.done{color:var(--accent);border-color:var(--accent)}
+
+  .spec{width:100%;border-collapse:collapse;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .spec th,.spec td{padding:12px 16px;text-align:left;font-size:14.2px;border-bottom:1px solid var(--line)}
+  .spec tr:last-child td{border-bottom:0}
+  .spec th{color:var(--dim);font-weight:600;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;background:var(--surface)}
+  .spec td:first-child{color:var(--sub);width:38%}
+  .spec td:last-child{font-family:var(--mono);font-size:13.4px}
+  .spec tbody tr{background:var(--bg2)}
+  .spec tbody tr:hover{background:var(--surface)}
+
+  .limits{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.limits{grid-template-columns:1fr}}
+  .limit{display:flex;gap:12px;padding:16px 18px;background:rgba(240,180,95,.05);border:1px solid rgba(240,180,95,.18);border-radius:12px}
+  .limit .b{color:var(--warn);font-size:15px;line-height:1.3}
+  .limit p{margin:0;font-size:14px;color:var(--sub)}
+  .limit p b{color:var(--ink);font-weight:600}
+
+  .final{margin:0 0 80px;padding:48px 40px;border-radius:18px;text-align:center;background:linear-gradient(160deg,rgba(95,211,196,.09),rgba(127,140,249,.07));border:1px solid var(--line2)}
+  .final h2{margin:0 0 10px}
+  .final p{color:var(--sub);margin:0 0 26px;font-size:15.5px}
+
+  footer{border-top:1px solid var(--line);padding:28px 0 44px}
+  footer .inner{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;color:var(--dim);font-size:13px}
+  footer a{color:var(--sub);text-decoration:none}
+  footer a:hover{color:var(--accent)}
+  .mono{font-family:var(--mono)}
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="inner">
+    <div class="logo"><span class="dot"></span>91 video</div>
+    <div class="links">
+      <a class="txt" href="#features">特性</a>
+      <a class="txt" href="#start">快速开始</a>
+      <a class="txt" href="#spec">规格</a>
+      <a class="txt" href="#limits">限制</a>
+      <a class="gh-btn" href="https://github.com/linyuanxuan/9191919191" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <header class="hero">
+    <span class="chip"><span class="pulse"></span>2026 · v0.1.0 · 整活项目</span>
+    <h1>两个通道，<br><span class="grad">同一个结局</span></h1>
+    <p class="lead">单文件静态前端 + Cloudflare Workers KV 全局计数器。不用 localStorage，不做花哨特效，只做一件事：把人骗到 Rick Astley 面前，再告诉他排第几。</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/linyuanxuan/9191919191" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        在 GitHub 上查看
+      </a>
+      
+      <a class="btn ghost" href="#start">快速开始 →</a>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">1<em> 个 HTML</em></div><div class="v">前端单文件</div></div><div class="stat"><div class="k">0<em> 依赖</em></div><div class="v">原生 JS 实现</div></div><div class="stat"><div class="k">2<em> 接口</em></div><div class="v">hit / count</div></div><div class="stat"><div class="k">MIT<em></em></div><div class="v">开源许可</div></div>
+    </div>
+
+    <div class="terminal">
+      <div class="term-bar"><i></i><i></i><i></i><span class="t">bash — 91 video counter</span></div>
+      <div class="term-body"><span class="c">$ curl -X POST https://&lt;worker&gt;.workers.dev/api/hit</span><span class="p">{&quot;count&quot;: 42}</span><span class="m"># 前端显示：你是第 42 个被骗的</span><span class="c">$ npx wrangler deploy</span><span class="m">Deployed rickroll-counter  ·  KV binding: COUNTER_KV</span></div>
+    </div>
+  </header>
+
+  <section id="features">
+    <div class="sec-head reveal">
+      <div class="num">01 / FEATURES</div>
+      <h2>它做了什么</h2>
+      <p>前端尽量薄，计数全部交给边缘；该兜底的地方都兜住。</p>
+    </div>
+    <div class="grid">
+      <div class="card reveal"><div class="ico">◍</div><h3>单文件前端</h3><p>白底黑框，两个通道都指向同一个被骗页；hash 路由切换视图，不刷新、不跳转外部页面。</p></div><div class="card reveal"><div class="ico">↻</div><h3>后端全局计数</h3><p>Workers KV 保存全局计数，POST /api/hit 加一，GET /api/count 只读；页面不使用 localStorage。</p></div><div class="card reveal"><div class="ico">♪</div><h3>自动播放兜底</h3><p>先静音自动播放绕过浏览器限制，点击页面任意位置开启声音；接口超时与失败都有降级提示，不卡死页面。</p></div><div class="card reveal"><div class="ico">⌘</div><h3>CORS 与预检</h3><p>OPTIONS 返回 204，所有响应（含错误）都带 CORS 头，并用 no-store 防止计数被缓存。</p></div><div class="card reveal"><div class="ico">◈</div><h3>简单 IP 限流</h3><p>单 IP 每 60 秒最多 5 次 hit，KV 里只存 IP 哈希，超限返回 429 与 Retry-After。</p></div><div class="card reveal"><div class="ico">✓</div><h3>脏数据容错</h3><p>KV 内容非纯数字、负数或溢出一律按 0 处理；KV 读写异常返回 503 而不是让请求崩掉。</p></div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="sec-head reveal">
+      <div class="num">02 / QUICKSTART</div>
+      <h2>四步跑起来</h2>
+      <p>从空仓库到能骗人，需要两次部署和两个占位符。</p>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <div class="n">1</div>
+        <div>
+          <h4>创建 KV 命名空间</h4>
+          <div class="code"><button class="copy">copy</button>npx wrangler login
+npx wrangler kv namespace create COUNTER_KV</div>
+          <p class="note">把输出的 id 填进 wrangler.toml 的 id 字段。本地 dev 可再加 --preview 生成 preview_id。</p>
+        </div>
+      </div><div class="step reveal">
+        <div class="n">2</div>
+        <div>
+          <h4>部署 Worker</h4>
+          <div class="code"><button class="copy">copy</button>npx wrangler dev      # 本地调试
+npx wrangler deploy   # 上线</div>
+          <p class="note">部署成功后终端给出 https://rickroll-counter.&lt;子域&gt;.workers.dev，即 API 地址。</p>
+        </div>
+      </div><div class="step reveal">
+        <div class="n">3</div>
+        <div>
+          <h4>配置前端 API 地址</h4>
+          <div class="code"><button class="copy">copy</button>&lt;html lang=&quot;zh-CN&quot; data-api=&quot;https://rickroll-counter.&lt;子域&gt;.workers.dev&quot;&gt;</div>
+          <p class="note">临时测试可用查询参数覆盖：index.html?api=https://xxx.workers.dev。</p>
+        </div>
+      </div><div class="step reveal">
+        <div class="n">4</div>
+        <div>
+          <h4>托管前端</h4>
+          <div class="code"><button class="copy">copy</button>git add -A
+git commit -m &quot;feat: 91 video Rickroll 计数器&quot;
+git push -u origin main</div>
+          <p class="note">纯静态单文件，GitHub Pages 或 Cloudflare Pages 直接托管，无需构建。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="spec">
+    <div class="sec-head reveal">
+      <div class="num">03 / SPEC</div>
+      <h2>规格</h2>
+      <p>不用翻代码就能判断是否适合自己。</p>
+    </div>
+    <table class="spec reveal">
+      <thead><tr><th>项目</th><th>规格</th></tr></thead>
+      <tbody><tr><td>前端</td><td>index.html 单文件，零构建、零框架</td></tr><tr><td>后端</td><td>Cloudflare Workers，ES Module，src/index.js</td></tr><tr><td>存储</td><td>Workers KV，binding = COUNTER_KV</td></tr><tr><td>第三方依赖</td><td>0 个（视频为 YouTube 官方嵌入播放器）</td></tr><tr><td>限流</td><td>单 IP 60 秒最多 5 次 hit</td></tr><tr><td>计数上限</td><td>Number.MAX_SAFE_INTEGER - 1</td></tr><tr><td>许可</td><td>MIT</td></tr></tbody>
+    </table>
+  </section>
+
+  <section id="limits">
+    <div class="sec-head reveal">
+      <div class="num">04 / LIMITS</div>
+      <h2>先说清楚它做不到什么</h2>
+      <p>整活项目也要把边界写明白。</p>
+    </div>
+    <div class="limits">
+      <div class="limit reveal"><div class="b">✕</div><p><b>计数不是严格原子</b><br>Workers KV 最终一致且没有原子自增，并发写入可能少量漏计。需要精确计数请换 Durable Objects。</p></div><div class="limit reveal"><div class="b">✕</div><p><b>限流不是安全边界</b><br>同样受 KV 最终一致影响，属于尽力而为的防刷；要硬限流请用平台 Rate Limiting API 或 Durable Objects。</p></div><div class="limit reveal"><div class="b">✕</div><p><b>YouTube 可能被网络环境拦截</b><br>页面会降级为普通 iframe 并给出跳转链接；降级模式下「点击开声音」靠重建播放器实现，成功率不是 100%。</p></div><div class="limit reveal"><div class="b">✕</div><p><b>两个占位符必须替换</b><br>wrangler.toml 的 KV id 与 index.html 的 data-api 默认是占位值，不替换无法正常运行。</p></div>
+    </div>
+  </section>
+
+  <div class="final reveal">
+    <h2>想看代码？</h2>
+    <p>前后端全部源码都在仓库里，欢迎 issue 和 PR，也欢迎提交第 N 个被骗截图。</p>
+    <a class="btn primary" href="https://github.com/linyuanxuan/9191919191" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      打开 GitHub 仓库
+    </a>
+  </div>
+
+  <footer>
+    <div class="inner">
+      <span>整活归整活，代码是认真的。</span>
+      <span><a href="https://github.com/linyuanxuan/9191919191" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/linyuanxuan/9191919191/issues" target="_blank" rel="noopener">Issues</a></span>
+    </div>
+  </footer>
+</div>
+
+<script>
+  document.querySelectorAll('.copy').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var box = btn.parentElement.cloneNode(true);
+      var b = box.querySelector('.copy'); if (b) b.remove();
+      var text = box.innerText.replace(/\s+$/, '');
+      var done = function(){
+        btn.textContent = 'copied'; btn.classList.add('done');
+        setTimeout(function(){ btn.textContent = 'copy'; btn.classList.remove('done'); }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta); done();
+      }
+    });
+  });
+
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach(function(el, i){
+    el.style.transitionDelay = (Math.min(i % 6, 5) * 45) + 'ms';
+    io.observe(el);
+  });
+</script>
+</body>
+</html>

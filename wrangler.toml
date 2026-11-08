@@ -1,0 +1,17 @@
+# Cloudflare Workers 配置
+# 部署前把下面的 id 换成 `npx wrangler kv namespace create COUNTER_KV` 输出的真实 ID。
+
+name = "rickroll-counter"
+main = "src/index.js"
+# 兼容日期取一个稳定值即可；本项目只用 URL / Headers / KV 等基础 API，无需最新运行时特性
+compatibility_date = "2024-09-23"
+
+# 全局计数器命名空间。binding 必须叫 COUNTER_KV，与 src/index.js 里的 env.COUNTER_KV 对应。
+[[kv_namespaces]]
+binding = "COUNTER_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+# 使用 `npx wrangler kv namespace create COUNTER_KV --preview` 生成后，取消注释可用于本地 dev
+# preview_id = "REPLACE_WITH_YOUR_PREVIEW_NAMESPACE_ID"
+
+# 可选：关闭 workers.dev 子域（默认开启，部署后会给出 https://rickroll-counter.<子域>.workers.dev）
+# workers_dev = true

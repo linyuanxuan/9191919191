@@ -1,0 +1,93 @@
+{
+  "project": "91 video",
+  "tagline": "用 Workers KV 统计「被骗人数」的 Rickroll 整活页",
+  "chip": "2026 · v0.1.0 · 整活项目",
+  "title_main": "两个通道，",
+  "title_sub": "同一个结局",
+  "lead": "单文件静态前端 + Cloudflare Workers KV 全局计数器。不用 localStorage，不做花哨特效，只做一件事：把人骗到 Rick Astley 面前，再告诉他排第几。",
+  "desc": "91 video：单文件前端 + Cloudflare Workers KV 全局计数器的 Rickroll 整活项目，含 CORS 预检、IP 限流与脏数据容错。",
+  "repo_url": "https://github.com/linyuanxuan/9191919191",
+  "site_url": "",
+  "license": "MIT",
+  "term_title": "bash — 91 video counter",
+  "term_lines": [
+    { "cls": "c", "text": "$ curl -X POST https://<worker>.workers.dev/api/hit" },
+    { "cls": "p", "text": "{\"count\": 42}" },
+    { "cls": "m", "text": "# 前端显示：你是第 42 个被骗的" },
+    { "cls": "c", "text": "$ npx wrangler deploy" },
+    { "cls": "m", "text": "Deployed rickroll-counter  ·  KV binding: COUNTER_KV" }
+  ],
+  "stats": [
+    { "value": "1", "unit": " 个 HTML", "label": "前端单文件" },
+    { "value": "0", "unit": " 依赖", "label": "原生 JS 实现" },
+    { "value": "2", "unit": " 接口", "label": "hit / count" },
+    { "value": "MIT", "unit": "", "label": "开源许可" }
+  ],
+  "features_title": "它做了什么",
+  "features_desc": "前端尽量薄，计数全部交给边缘；该兜底的地方都兜住。",
+  "features": [
+    { "icon": "◍", "title": "单文件前端", "desc": "白底黑框，两个通道都指向同一个被骗页；hash 路由切换视图，不刷新、不跳转外部页面。", "desc_plain": "白底黑框，两个通道都指向同一个被骗页；hash 路由切换视图，不刷新页面。" },
+    { "icon": "↻", "title": "后端全局计数", "desc": "Workers KV 保存全局计数，POST /api/hit 加一，GET /api/count 只读；页面不使用 localStorage。", "desc_plain": "Workers KV 保存全局计数，POST /api/hit 加一，GET /api/count 只读；页面不使用 localStorage。" },
+    { "icon": "♪", "title": "自动播放兜底", "desc": "先静音自动播放绕过浏览器限制，点击页面任意位置开启声音；接口超时与失败都有降级提示，不卡死页面。", "desc_plain": "先静音自动播放绕过浏览器限制，点击页面开启声音；接口超时与失败都有降级提示，不卡死页面。" },
+    { "icon": "⌘", "title": "CORS 与预检", "desc": "OPTIONS 返回 204，所有响应（含错误）都带 CORS 头，并用 no-store 防止计数被缓存。", "desc_plain": "OPTIONS 返回 204，所有响应含错误都带 CORS 头，并用 no-store 防止计数被缓存。" },
+    { "icon": "◈", "title": "简单 IP 限流", "desc": "单 IP 每 60 秒最多 5 次 hit，KV 里只存 IP 哈希，超限返回 429 与 Retry-After。", "desc_plain": "单 IP 每 60 秒最多 5 次 hit，KV 里只存 IP 哈希，超限返回 429 与 Retry-After。" },
+    { "icon": "✓", "title": "脏数据容错", "desc": "KV 内容非纯数字、负数或溢出一律按 0 处理；KV 读写异常返回 503 而不是让请求崩掉。", "desc_plain": "KV 内容非纯数字、负数或溢出一律按 0 处理；KV 读写异常返回 503 而不是让请求崩掉。" }
+  ],
+  "start_title": "四步跑起来",
+  "start_desc": "从空仓库到能骗人，需要两次部署和两个占位符。",
+  "steps": [
+    {
+      "n": "1",
+      "title": "创建 KV 命名空间",
+      "code": "npx wrangler login\nnpx wrangler kv namespace create COUNTER_KV",
+      "code_plain": "npx wrangler login\nnpx wrangler kv namespace create COUNTER_KV",
+      "note": "把输出的 id 填进 wrangler.toml 的 id 字段。本地 dev 可再加 --preview 生成 preview_id。"
+    },
+    {
+      "n": "2",
+      "title": "部署 Worker",
+      "code": "npx wrangler dev      # 本地调试\nnpx wrangler deploy   # 上线",
+      "code_plain": "npx wrangler dev\nnpx wrangler deploy",
+      "note": "部署成功后终端给出 https://rickroll-counter.<子域>.workers.dev，即 API 地址。"
+    },
+    {
+      "n": "3",
+      "title": "配置前端 API 地址",
+      "code": "<html lang=\"zh-CN\" data-api=\"https://rickroll-counter.<子域>.workers.dev\">",
+      "code_plain": "把 index.html 的 data-api 改成你的 Worker 地址",
+      "note": "临时测试可用查询参数覆盖：index.html?api=https://xxx.workers.dev。"
+    },
+    {
+      "n": "4",
+      "title": "托管前端",
+      "code": "git add -A\ngit commit -m \"feat: 91 video Rickroll 计数器\"\ngit push -u origin main",
+      "code_plain": "git add -A\ngit commit -m \"feat: 91 video Rickroll 计数器\"\ngit push -u origin main",
+      "note": "纯静态单文件，GitHub Pages 或 Cloudflare Pages 直接托管，无需构建。"
+    }
+  ],
+  "usage": "### 后端部署（Cloudflare Workers）\n\n```bash\nnpx wrangler login\nnpx wrangler kv namespace create COUNTER_KV\n```\n\n把输出的 `id` 填进 `wrangler.toml` 的 `id = \"...\"`。需要本地 `wrangler dev` 时，再执行 `npx wrangler kv namespace create COUNTER_KV --preview`，把结果填到 `preview_id`。\n\n```bash\nnpx wrangler dev       # 本地调试\nnpx wrangler deploy    # 上线\n```\n\n部署完成后终端会输出 `https://rickroll-counter.<子域>.workers.dev`，即前端要填的 API 地址。\n\n### 前端配置\n\n编辑 `index.html` 顶部的 `<html>` 标签，把 `data-api` 换成上一步的地址：\n\n```html\n<html lang=\"zh-CN\" data-api=\"https://rickroll-counter.<子域>.workers.dev\">\n```\n\n不想改文件时，可用查询参数临时覆盖：`index.html?api=https://xxx.workers.dev`。占位符未替换时页面会给出明确提示，不会发无效请求。\n\n### 接口\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| POST | `/api/hit` | 计数 +1，返回 `{\"count\": N}`；受 IP 限流约束 |\n| GET | `/api/count` | 只读，返回 `{\"count\": N}`，不计数 |\n| OPTIONS | 任意路径 | 返回 204 与 CORS 头 |\n\n```bash\ncurl https://<worker>.workers.dev/api/count\ncurl -X POST https://<worker>.workers.dev/api/hit\n```\n\n错误统一为 `{\"error\": \"...\"}`：429 带 `Retry-After`，500 表示 KV 绑定缺失，503 表示 KV 读写失败。所有响应带 `Access-Control-Allow-Origin: *` 与 `Cache-Control: no-store`。\n\n### Git 提交与推送\n\n```bash\ngit init -b main\ngit add -A\ngit commit -m \"feat: 91 video Rickroll 计数器\"\ngit remote add origin https://github.com/linyuanxuan/9191919191.git\ngit push -u origin main\n```\n\n认证交给系统 Git（Credential Manager / SSH key），仓库里不放任何凭据。",
+  "spec_title": "规格",
+  "spec_desc": "不用翻代码就能判断是否适合自己。",
+  "specs": [
+    { "k": "前端", "v": "index.html 单文件，零构建、零框架" },
+    { "k": "后端", "v": "Cloudflare Workers，ES Module，src/index.js" },
+    { "k": "存储", "v": "Workers KV，binding = COUNTER_KV" },
+    { "k": "第三方依赖", "v": "0 个（视频为 YouTube 官方嵌入播放器）" },
+    { "k": "限流", "v": "单 IP 60 秒最多 5 次 hit" },
+    { "k": "计数上限", "v": "Number.MAX_SAFE_INTEGER - 1" },
+    { "k": "许可", "v": "MIT" }
+  ],
+  "limits_title": "先说清楚它做不到什么",
+  "limits_desc": "整活项目也要把边界写明白。",
+  "limits": [
+    { "title": "计数不是严格原子", "desc": "Workers KV 最终一致且没有原子自增，并发写入可能少量漏计。需要精确计数请换 Durable Objects。" },
+    { "title": "限流不是安全边界", "desc": "同样受 KV 最终一致影响，属于尽力而为的防刷；要硬限流请用平台 Rate Limiting API 或 Durable Objects。" },
+    { "title": "YouTube 可能被网络环境拦截", "desc": "页面会降级为普通 iframe 并给出跳转链接；降级模式下「点击开声音」靠重建播放器实现，成功率不是 100%。" },
+    { "title": "两个占位符必须替换", "desc": "wrangler.toml 的 KV id 与 index.html 的 data-api 默认是占位值，不替换无法正常运行。" }
+  ],
+  "final_title": "想看代码？",
+  "final_desc": "前后端全部源码都在仓库里，欢迎 issue 和 PR，也欢迎提交第 N 个被骗截图。",
+  "footer_note": "整活归整活，代码是认真的。",
+  "intro": "一个经典的 Rickroll 玩笑：落地页写着「本站永远免费」，两个通道按钮都把访客送到同一个被骗页。\n\n被骗页不只是放视频，还会告诉访客「你是第 N 个被骗的」。这个 N 存在 Cloudflare Workers KV 里，由后端统一维护——页面不用 localStorage、不用 cookie，换设备、换浏览器看到的都是同一个全局数字。\n\n实现上刻意保持克制：前端一个 HTML 文件，后端一个 JS 文件，零第三方依赖；CORS、OPTIONS 预检、IP 限流、脏数据容错、接口超时降级都在后端和前端各兜一层，网络出问题也不会把页面卡死。",
+  "tree": "├── index.html        # 前端：落地页 + 被骗页（单文件双视图）\n├── src/\n│   └── index.js      # Cloudflare Workers 后端\n├── wrangler.toml     # Worker 与 KV 绑定配置\n├── showcase.html     # 项目介绍页（本仓库的说明页）\n├── site.json         # 介绍页 / README 的生成配置\n├── _headers          # Cloudflare Pages 响应头\n├── README.md\n└── LICENSE"
+}
